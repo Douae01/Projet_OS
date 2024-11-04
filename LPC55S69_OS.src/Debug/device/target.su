@@ -1,0 +1,17 @@
+/home/douae/ENIB/SEN/OS/LPC55S69_OS.src/CMSIS/core_cm33.h:2324:22:__NVIC_SetPriority	16	static
+/home/douae/ENIB/SEN/OS/LPC55S69_OS.src/drivers/fsl_gpio.h:153:20:GPIO_PinWrite	24	static
+../device/target.c:37:12:dev_init_test	16	static
+../device/target.c:44:12:dev_open_test	16	static
+../device/target.c:56:12:dev_close_test	16	static
+../device/target.c:64:12:dev_read_test	40	static
+../device/target.c:82:13:leds	16	static
+../device/target.c:112:12:dev_init_leds	24	static
+../device/target.c:128:12:dev_open_leds	16	static
+../device/target.c:143:12:dev_close_leds	16	static
+../device/target.c:151:12:dev_write_leds	24	static
+../device/target.c:186:13:on_swuser_cb	16	static
+../device/target.c:192:12:dev_init_btn	16	static
+../device/target.c:213:12:dev_open_btn	16	static
+../device/target.c:228:12:dev_close_btn	16	static
+../device/target.c:236:12:dev_read_btn	24	static
+../device/target.c:258:6:dev_init	24	static

@@ -1,0 +1,16 @@
+/home/douae/ENIB/SEN/OS/LPC55S69_OS.src/CMSIS/core_cm33.h:2324:22:__NVIC_SetPriority	16	static
+/home/douae/ENIB/SEN/OS/LPC55S69_OS.src/CMSIS/core_cm33.h:2773:26:SysTick_Config	16	static
+../kernel/kernel.c:26:5:sys_add	16	static
+../kernel/kernel.c:36:9:svc_dispatch	24	static
+../kernel/kernel.c:81:6:sys_switch_ctx	4	static
+../kernel/kernel.c:95:6:sys_tick_cb	24	static
+../kernel/kernel.c:127:6:SysTick_Handler	8	static
+../kernel/kernel.c:144:9:sys_os_start	16	static
+../kernel/kernel.c:191:9:sys_task_new	24	static
+../kernel/kernel.c:239:9:sys_task_kill	16	static
+../kernel/kernel.c:263:9:sys_task_id	4	static
+../kernel/kernel.c:274:9:sys_task_yield	4	static
+../kernel/kernel.c:283:9:sys_task_wait	16	static
+../kernel/kernel.c:304:13:sys_sem_new	24	static
+../kernel/kernel.c:320:9:sys_sem_p	24	static
+../kernel/kernel.c:343:9:sys_sem_v	24	static
