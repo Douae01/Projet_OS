@@ -1,0 +1,12 @@
+!SESSION 2024-11-04 12:14:45.060 -----------------------------------------------
+eclipse.buildId=unknown
+java.version=17.0.9
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=linux, ARCH=x86_64, WS=gtk, NL=en_US
+Command-line arguments:  -os linux -ws gtk -arch x86_64
+
+!ENTRY com.nxp.mcuxpresso.core.datamodels 1 0 2024-11-04 12:15:14.824
+!MESSAGE Recreating part support. No part support available.
+
+!ENTRY com.nxp.mcuxpresso.core.datamodels 1 0 2024-11-04 12:15:20.182
+!MESSAGE The device 'LPC55S69' (version='1.0.0') from SDK 'SDK_2.x_LPCXpresso55S69' (version='2.16.000', build='epluginsite808 2024-07-15') will be installed.
