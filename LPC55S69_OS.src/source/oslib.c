@@ -74,7 +74,7 @@ int32_t task_new(TaskCode func, uint32_t stacksize)
 uint32_t task_id()
 {
     uint32_t val;
-    __ASM volatile ("svc 5\n\tmov %0, r0" : "=r" (val)); // Numéro SVC 5 pour `task_id`
+    __ASM volatile ("svc 5\n\tmov %0, r0" : "=r" (val));
 
     return val;
 }

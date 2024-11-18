@@ -3,7 +3,7 @@
 
 #include "oslib.h"
 
-#define MAIN_EX10
+#define MAIN_EX11
 
 /*********************************************************************/
 #ifdef MAIN_TEST
@@ -469,7 +469,31 @@ int main()
 #endif
 /*********************************************************************/
 #ifdef MAIN_EX11
-/* ...uart */
+
+Semaphore * sem;
+
+void idle()
+{
+    while (1) {}
+}
+
+volatile int taskA_running = 1; // 1 means running, 0 means stop
+// Fonctions auxiliaires pour les LEDs et tâches
+void tache1()
+{
+    uint8_t data=1;
+
+    int fd=open("/dev/leds",O_WRONLY);
+
+    while (taskA_running) {
+        write(fd,&data,1);
+        data=data<<1;
+        if (data==0x8) data=1;
+        task_wait(500);
+    }
+    write(fd, "\0", 1);
+}
+
 static void leds_init()
 {
 	gpio_pin_config_t ledcfg = { kGPIO_DigitalOutput, 1};
@@ -489,11 +513,62 @@ static void leds(uint32_t val)
 	GPIO_PinWrite(BOARD_LED_BLUE_GPIO,BOARD_LED_BLUE_GPIO_PORT,BOARD_LED_BLUE_GPIO_PIN, (~(val>>2))&1);
 }
 
-int main(){
-	while (1) {
-		leds(1<<2);
-	}
-	return 0;
+
+void serialTask()
+{
+    int serial = open("/dev/serial", O_RDWR);
+    if (serial < 0) {
+        perror("Erreur d'ouverture du port série");
+        return;
+    }
+
+    char buff[255];
+
+    while (1)
+    {
+        // Lire le choix de l'utilisateur
+        if (read(serial, buff, 1) > 0)
+        {
+            char choice = buff[0];
+            switch (choice)
+            {
+                case 'R':
+                    leds(1); // Allume/éteint la LED rouge
+                    break;
+                case 'G':
+                    leds(2); // Allume/éteint la LED verte
+                    break;
+                case 'B':
+                    leds(4); // Allume/éteint la LED bleue
+                    break;
+                case 'A':
+                    task_new(tache1, 256);
+                    taskA_running = 1;
+                    break;
+                case 'Q':
+                    write(serial, "\r\nFin programme...\r\n", 19);
+                    taskA_running = 0;
+                    leds(0); // éteindre les LEDs
+                    close(serial);
+                    task_kill();
+                    break;
+                default:
+                    write(serial, "\r\nChoix non valide!\r\n", 18);
+                    break;
+            }
+        }
+    }
 }
+
+int main() {
+    // Lancer les tâches de série et de veille
+    task_new(serialTask, 1024);
+    task_new(idle, 0);
+
+    // Démarrer le système d'exploitation (hypothèse d'un RTOS)
+    os_start();
+    return 0;
+}
+
 #endif
 /*********************************************************************/

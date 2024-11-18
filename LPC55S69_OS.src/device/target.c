@@ -4,7 +4,7 @@
 #include "board.h"
 #include "fsl_pint.h"
 #include "fsl_inputmux.h"
-
+#include "fsl_usart.h"
 #include "vfs.h"
 #include "target.h"
 
@@ -100,6 +100,7 @@ Device dev_leds={
     .init=dev_init_leds,
     
 	/* A COMPLETER */
+
 	.sem_read=NULL,
 	.sem_write=NULL,
 	.open=dev_open_leds,
@@ -121,7 +122,7 @@ static int dev_init_leds(Device *dev)
 	leds(0);
 
 	/* A COMPLETER */
-	dev->mutex = sem_new(1);
+	dev->mutex = sem_new(1);//create r/w mutex
 	return 1;
 }
 
@@ -207,6 +208,7 @@ static int dev_init_btn(Device *dev)
 	/* A COMPLETER */
     dev->sem_read = sem_new(1);// init pour lu sem
     dev->mutex = sem_new(1); //init pour deblock
+
     return 1;
 }
 
@@ -241,12 +243,179 @@ static int dev_read_btn(FileObject *f, void *buf, size_t len)
 }
 
 /***************************************************************************
+ * Serial Port Device Driver
+ ***************************************************************************/
+
+static int dev_init_ser(Device *dev);
+static int dev_open_ser(FileObject *f);
+static int dev_close_ser(FileObject *f);
+static int dev_read_ser(FileObject *fileObj, void *buffer, size_t length);
+static int dev_write_ser(FileObject *fileObj, const void *buffer, size_t length);
+
+Device dev_serial = {
+    .name = "serial",
+    .refcnt = 0,
+    .init = dev_init_ser,
+
+	/* A COMPLETER */
+    .open = dev_open_ser,
+    .close = dev_close_ser,
+    .read = dev_read_ser,
+    .write = dev_write_ser,
+    .sem_read = NULL,
+    .sem_write = NULL,
+    .ioctl = NULL
+};
+
+#define RING_BUF_SIZE	32
+
+typedef volatile struct RingBuffer {
+	char data[RING_BUF_SIZE];
+	int	i_w;
+	int i_r;
+} RingBuffer;
+
+RingBuffer rxbuf = {
+	.i_w=0,
+	.i_r=0
+};
+
+RingBuffer txbuf = {
+	.i_w=0,
+	.i_r=0
+};
+
+volatile int user_break=0;
+
+// USART Interrupt Service Routine
+void FLEXCOMM0_IRQHandler()
+{
+    uint32_t status = USART_GetStatusFlags(USART0);
+
+    // Handle RX errors
+    if ((USART0->FIFOSTAT & USART_FIFOSTAT_RXERR_MASK) != 0U) {
+        USART0->FIFOSTAT |= USART_FIFOSTAT_RXERR_MASK;
+        USART0->FIFOCFG |= USART_FIFOCFG_EMPTYRX_MASK;  // Clear RX FIFO
+    } else if (((rxbuf.i_w + 1) % RING_BUF_SIZE) != rxbuf.i_r) {
+        // Receive data into RX buffer
+        while ((status & kUSART_RxFifoNotEmptyFlag) && (((rxbuf.i_w + 1) % RING_BUF_SIZE) != rxbuf.i_r)) {
+            rxbuf.data[rxbuf.i_w] = USART0->FIFORD;
+            rxbuf.i_w = (rxbuf.i_w + 1) % RING_BUF_SIZE;
+            status = USART_GetStatusFlags(USART0);
+            user_break = 1;
+        }
+    } else {
+        USART_ReadByte(USART0);  // Discard the byte if buffer is full
+    }
+
+    // Transmit data from TX buffer
+    while ((status & kUSART_TxFifoNotFullFlag) && (txbuf.i_r != txbuf.i_w)) {
+        USART0->FIFOWR = txbuf.data[txbuf.i_r];
+        txbuf.i_r = (txbuf.i_r + 1) % RING_BUF_SIZE;
+        status = USART_GetStatusFlags(USART0);
+
+        if (txbuf.i_r == txbuf.i_w) {
+            USART_DisableInterrupts(USART0, kUSART_TxLevelInterruptEnable);
+        }
+    }
+}
+
+// USART Initialization Function
+void uart_init(USART_Type *base, uint32_t baudrate)
+{
+    usart_config_t config;
+    CLOCK_AttachClk(kFRO12M_to_FLEXCOMM0);
+
+    USART_GetDefaultConfig(&config);
+    config.baudRate_Bps = baudrate;
+    config.enableTx = true;
+    config.enableRx = true;
+
+    USART_Init(base, &config, CLOCK_GetFlexCommClkFreq(0U));
+
+    // Enable RX interrupt
+    USART_EnableInterrupts(base, kUSART_RxLevelInterruptEnable);
+    NVIC_SetPriority(FLEXCOMM0_IRQn, 3);
+    NVIC_EnableIRQ(FLEXCOMM0_IRQn);
+}
+
+// Initialize serial device
+static int dev_init_ser(Device *dev)
+{
+	uart_init(USART0,115200U);
+    dev->mutex=sem_new(1);
+    if (dev->mutex)
+       	return 1;
+    return 0;
+}
+
+// Open the serial device
+static int dev_open_ser(FileObject *f)
+{
+	sem_p(f->dev->mutex);
+	    if (f->dev->refcnt || (f->flags & (O_NONBLOCK|O_APPEND|O_SHLOCK|O_EXLOCK|O_ASYNC|O_SYNC|O_CREAT|O_TRUNC|O_EXCL)))
+	        goto err;
+	    if (f->flags & (O_READ | O_WRITE)) {
+	        f->dev->refcnt++;
+			sem_v(f->dev->mutex);
+	        return 1;
+	    }
+	err:
+		sem_v(f->dev->mutex);
+	    return 0;
+}
+
+// Close the serial device
+static int dev_close_ser(FileObject *f)
+{
+    sem_p(f->dev->mutex);
+    f->dev->refcnt--;
+    sem_v(f->dev->mutex);
+    return 1;
+}
+
+// Read from serial device using ring buffer
+static int dev_read_ser(FileObject *fileObj, void *buffer, size_t length)
+{
+    sem_p(fileObj->dev->mutex);
+    size_t bytesRead = 0;
+    char *dataBuffer = (char *)buffer;
+
+    while (bytesRead < length && rxbuf.i_r != rxbuf.i_w) {
+        dataBuffer[bytesRead] = rxbuf.data[rxbuf.i_r];
+        rxbuf.i_r = (rxbuf.i_r + 1) % RING_BUF_SIZE;
+        bytesRead++;
+    }
+    fileObj->offset += bytesRead;
+    sem_v(fileObj->dev->mutex);
+    return bytesRead;
+}
+
+// Write to serial device using ring buffer
+static int dev_write_ser(FileObject *fileObj, const void *buffer, size_t length)
+{
+    sem_p(fileObj->dev->mutex);
+    const char *dataBuffer = (const char *)buffer;
+
+    for (size_t i = 0; i < length; i++) {
+        while ((txbuf.i_w + 1) % RING_BUF_SIZE == txbuf.i_r);  // Wait if buffer is full
+        txbuf.data[txbuf.i_w] = dataBuffer[i];
+        txbuf.i_w = (txbuf.i_w + 1) % RING_BUF_SIZE;
+    }
+    USART_EnableInterrupts(USART0, kUSART_TxLevelInterruptEnable);  // Enable TX interrupt
+    sem_v(fileObj->dev->mutex);
+    return length;
+}
+
+
+/***************************************************************************
  * Device table
  ***************************************************************************/
 Device * device_table[]={
 	&dev_test,
 	&dev_leds,
     &dev_swuser,
+	&dev_serial,
 	NULL
 };
 
@@ -263,10 +432,9 @@ void dev_init()
         if (dev->init) dev->init(dev);
         dev=device_table[++i];
     }
-    
+
     for (int i=0;i<MAX_OPENED_FDS;i++)
         opened_fds[i]=NULL;
 
     vfs_mutex=sem_new(1);
 }
-

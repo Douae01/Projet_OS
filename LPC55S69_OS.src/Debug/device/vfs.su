@@ -4,7 +4,7 @@
 ../device/vfs.c:68:16:dev_lookup	32	static
 ../device/vfs.c:108:5:open	48	static
 ../device/vfs.c:153:5:close	16	static
-../device/vfs.c:164:5:read	24	static
-../device/vfs.c:173:5:write	24	static
-../device/vfs.c:182:5:ioctl	24	static
-../device/vfs.c:191:5:lseek	16	static
+../device/vfs.c:165:5:read	24	static
+../device/vfs.c:174:5:write	24	static
+../device/vfs.c:183:5:ioctl	24	static
+../device/vfs.c:192:5:lseek	16	static

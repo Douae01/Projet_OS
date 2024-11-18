@@ -20,6 +20,7 @@ device/target.o device/target.d: ../device/target.c \
  /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/drivers/fsl_pint.h \
  /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/drivers/fsl_inputmux.h \
  /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/drivers/fsl_inputmux_connections.h \
+ /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/drivers/fsl_usart.h \
  ../device/vfs.h /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/source/oslib.h \
  ../device/target.h
 /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/board/board.h:
@@ -43,6 +44,7 @@ device/target.o device/target.d: ../device/target.c \
 /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/drivers/fsl_pint.h:
 /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/drivers/fsl_inputmux.h:
 /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/drivers/fsl_inputmux_connections.h:
+/home/douae/ENIB/SEN/OS/LPC55S69_OS.src/drivers/fsl_usart.h:
 ../device/vfs.h:
 /home/douae/ENIB/SEN/OS/LPC55S69_OS.src/source/oslib.h:
 ../device/target.h:

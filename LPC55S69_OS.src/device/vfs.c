@@ -152,6 +152,7 @@ int open(char *path, int flags)
  */
 int close(int fd)
 {
+	/* A COMPLETER */
 	opened_fds[fd]->dev->close(opened_fds[fd]);
 	free(opened_fds[fd]);
 	opened_fds[fd] = NULL;
