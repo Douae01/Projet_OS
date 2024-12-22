@@ -3,7 +3,7 @@
 
 #include "oslib.h"
 
-#define MAIN_EX11
+#define MAIN_EX10
 
 /*********************************************************************/
 #ifdef MAIN_TEST
@@ -513,6 +513,9 @@ static void leds(uint32_t val)
 	GPIO_PinWrite(BOARD_LED_BLUE_GPIO,BOARD_LED_BLUE_GPIO_PORT,BOARD_LED_BLUE_GPIO_PIN, (~(val>>2))&1);
 }
 
+volatile int ledRedState = 0;  // 0 means off, 1 means on
+volatile int ledGreenState = 0; // 0 means off, 1 means on
+volatile int ledBlueState = 0;  // 0 means off, 1 means on
 
 void serialTask()
 {
@@ -530,16 +533,21 @@ void serialTask()
         if (read(serial, buff, 1) > 0)
         {
             char choice = buff[0];
+            snprintf(buff, sizeof(buff), "\r\n%c\r\n", choice);
+            write(serial, buff, strlen(buff));
             switch (choice)
             {
                 case 'R':
-                    leds(1); // Allume/éteint la LED rouge
+                    ledRedState = !ledRedState;
+                    leds(ledRedState ? 1 : 0);  // Allume si state est 1, éteint si state est 0
                     break;
                 case 'G':
-                    leds(2); // Allume/éteint la LED verte
+                    ledGreenState = !ledGreenState;
+                    leds(ledGreenState ? 2 : 0); // Allume si state est 1, éteint si state est 0
                     break;
                 case 'B':
-                    leds(4); // Allume/éteint la LED bleue
+                    ledBlueState = !ledBlueState;
+                    leds(ledBlueState ? 4 : 0); // Allume si state est 1, éteint si state est 0
                     break;
                 case 'A':
                     task_new(tache1, 256);
@@ -572,3 +580,48 @@ int main() {
 
 #endif
 /*********************************************************************/
+#ifdef MAIN_EX12
+
+void accelTask()
+{
+    int serial = open("/dev/serial",O_WRONLY);
+
+	int lfd=open("/dev/accel",O_RDONLY);
+
+    char buff[255];
+    char strDebug[] = "Accelerometer Data:\n";
+    write(serial, strDebug, strlen(strDebug));
+
+    int32_t accData[3];
+
+    while (1)
+    {
+        status_t res = read(lfd, &accData, sizeof(accData));
+        if (res == sizeof(accData)) {
+        	int x,y,z;
+        	x=accData[0];
+        	y=accData[1];
+        	z=accData[2];
+
+            snprintf(buff, sizeof(buff), "\r\nEn mg => X: %d, Y: %d, Z: %d\r\n", x,y,z);
+            write(serial, buff, strlen(buff));
+        }
+        task_wait(500);
+    }
+}
+
+void idle()
+{
+    while (1){}
+}
+
+int main()
+{
+    task_new(accelTask, 1024);
+    task_new(idle, 0);
+    os_start();
+    return 0;
+}
+
+#endif
+

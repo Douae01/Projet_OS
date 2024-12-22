@@ -7,6 +7,8 @@
 #include "fsl_usart.h"
 #include "vfs.h"
 #include "target.h"
+#include "fsl_i2c.h"
+
 
 /***************************************************************************
  * external symbols
@@ -387,6 +389,7 @@ static int dev_read_ser(FileObject *fileObj, void *buffer, size_t length)
         bytesRead++;
     }
     fileObj->offset += bytesRead;
+
     sem_v(fileObj->dev->mutex);
     return bytesRead;
 }
@@ -409,6 +412,265 @@ static int dev_write_ser(FileObject *fileObj, const void *buffer, size_t length)
 
 
 /***************************************************************************
+ * accelerometer Device Driver
+ ***************************************************************************/
+
+#define MMA8652_RES_12				(0)
+#define MMA8652_RES_8				(2)
+
+#define MMA8652_SCALE_2G			(0<<16)
+#define MMA8652_SCALE_4G			(1<<16)
+#define MMA8652_SCALE_8G			(2<<16)
+
+#define MMA8652_RATE_800			(0<<3)
+#define MMA8652_RATE_400			(1<<3)
+#define MMA8652_RATE_200			(2<<3)
+#define MMA8652_RATE_100			(3<<3)
+#define MMA8652_RATE_50				(4<<3)
+#define MMA8652_RATE_12_5			(5<<3)
+#define MMA8652_RATE_6_25			(6<<3)
+#define MMA8652_RATE_1_56			(7<<3)
+
+#define MMA8652_INT					(1<<8)
+
+#define MMA8652_DATA_READY			(8)
+
+static I2C_Type* i2c;
+static i2c_master_handle_t i2c_handle;
+static uint32_t mma8652_cfg;
+
+static volatile status_t i2c_res;
+
+#define MMA8652_ADDR				0x1D
+
+#define MMA8652_STATUS      		0x00
+#define MMA8652_OUT_X_MSB			0x01
+#define MMA8652_OUT_X_LSB			0x02
+#define MMA8652_OUT_Y_MSB			0x03
+#define MMA8652_OUT_Y_LSB			0x04
+#define MMA8652_OUT_Z_MSB			0x05
+#define MMA8652_OUT_Z_LSB			0x06
+#define MMA8652_F_SETUP				0x09
+#define MMA8652_TRIG_CFG			0x0A
+#define MMA8652_SYSMOD				0x0B
+#define MMA8652_INT_SOURCE			0x0C
+#define MMA8652_WHOAMI				0x0D
+#define MMA8652_XYZ_DATA_CFG		0x0E
+#define MMA8652_CTRL_REG1			0x2A
+#define MMA8652_CTRL_REG2			0x2B
+#define MMA8652_CTRL_REG3			0x2C
+#define MMA8652_CTRL_REG4			0x2D
+#define MMA8652_CTRL_REG5			0x2E
+
+#define I2C4_MASTER_CLK		12000000
+
+status_t mma8652_read_xyz(int32_t* data);
+status_t mma8652_init(I2C_Type *base, uint32_t cfg);
+static int dev_init_acc(Device *dev);
+static int dev_open_acc(FileObject *f);
+static int dev_close_acc(FileObject *f);
+static int dev_read_acc(FileObject *fileObj, void *buffer, size_t length);
+
+
+Device dev_accelerometer = {
+	.name = "accel",
+    .refcnt = 0,
+    .init = dev_init_acc,
+
+
+    .open = dev_open_acc,
+    .close = dev_close_acc,
+    .read = dev_read_acc,
+    .write = NULL,
+    .sem_read = NULL,
+    .sem_write = NULL,
+    .ioctl = NULL
+};
+
+
+
+static void i2c_callback(I2C_Type *base, i2c_master_handle_t *handle, status_t status, void *userData)
+{
+   i2c_res = status;
+}
+
+static int dev_init_acc(Device *dev){
+
+    i2c_master_config_t fc4_config = {
+      .enableMaster = true,
+      .baudRate_Bps = 400000,
+      .enableTimeout = false
+    };
+
+    RESET_PeripheralReset(kFC4_RST_SHIFT_RSTn);
+    I2C_MasterInit(I2C4, &fc4_config, I2C4_MASTER_CLK);
+    NVIC_SetPriority(FLEXCOMM4_IRQn,3);
+
+    status_t initialized = !mma8652_init(I2C4, MMA8652_RATE_6_25|MMA8652_SCALE_2G|MMA8652_RES_12|MMA8652_INT);
+
+    dev->mutex=sem_new(1);
+    if (dev->mutex)
+       	return 1;
+    return 0;
+}
+
+static int dev_open_acc(FileObject *f)
+{
+	sem_p(f->dev->mutex);
+    if (f->dev->refcnt || (f->flags & (O_WRITE|O_NONBLOCK|O_APPEND|O_SHLOCK|O_EXLOCK|O_ASYNC|O_SYNC|O_CREAT|O_TRUNC|O_EXCL)))
+        goto err;
+    if (f->flags & O_READ) {
+        f->dev->refcnt++;
+		sem_v(f->dev->mutex);
+        return 1;
+    }
+err:
+	sem_v(f->dev->mutex);
+    return 0;
+}
+
+static int dev_close_acc(FileObject *f)
+{
+    sem_p(f->dev->mutex);
+    f->dev->refcnt--;
+    sem_v(f->dev->mutex);
+    return 1;
+}
+
+static int dev_read_acc(FileObject *fileObj, void *buffer, size_t length) {
+    int32_t data[3];
+    status_t res = mma8652_read_xyz(data);
+
+    if (res != kStatus_Success) {
+        return -1;
+    }
+    if (length < sizeof(data)) {
+        return -1;
+    }
+
+    memcpy(buffer, data, sizeof(data));
+
+    return sizeof(data);
+}
+
+status_t mma8652_init(I2C_Type *base, uint32_t cfg)
+{
+	uint8_t buf[5];
+    i2c_master_transfer_t xfer = {
+    	.slaveAddress 	= MMA8652_ADDR,
+        .direction 		= kI2C_Write,
+        .subaddress 	= MMA8652_CTRL_REG1,
+        .subaddressSize = 1,
+        .data 			= buf,
+        .dataSize 		= 5,
+        .flags 			= kI2C_TransferNoStopFlag
+    };
+
+	I2C_MasterTransferCreateHandle(base, &i2c_handle, i2c_callback, NULL);
+	i2c=base;
+	mma8652_cfg=cfg;
+
+	/* CTRL_REGx */
+	buf[0] = cfg;				// CTRL_REG1: rate, resolution, STANDBY MODE
+	buf[1] = 0;					// CTRL_REG2: normal mode, no sleep
+	buf[2] = 0;					// CTRL_REG3: no FIFO, no sleep, so no need for wake, low level on INT
+	buf[3] = (cfg>>8) & 1;		// CTRL_REG4: allow Data Ready Interrupt if in cfg
+	buf[4] = 1;					// CTRL_REG5: Data Ready Interrupt routed to pin INT1
+	i2c_res=kStatus_I2C_Busy;
+    I2C_MasterTransferNonBlocking(i2c, &i2c_handle, &xfer);
+
+    while (i2c_res==kStatus_I2C_Busy) {
+    }
+    if (i2c_res!=kStatus_Success) return kStatus_Fail;
+
+    /* XYZ_DATA_CFG */
+    buf[0]=cfg>>16;
+	xfer.slaveAddress 	= MMA8652_ADDR;
+    xfer.direction 		= kI2C_Write;
+    xfer.subaddress 	= MMA8652_XYZ_DATA_CFG;
+    xfer.subaddressSize = 1;
+    xfer.data 			= buf;
+    xfer.dataSize 		= 1;
+    xfer.flags 			= kI2C_TransferRepeatedStartFlag|kI2C_TransferNoStopFlag;
+
+	i2c_res=kStatus_I2C_Busy;
+    I2C_MasterTransferNonBlocking(i2c, &i2c_handle, &xfer);
+
+    while (i2c_res==kStatus_I2C_Busy) {
+    }
+    if (i2c_res!=kStatus_Success) return kStatus_Fail;
+
+    buf[0]=cfg | 1;
+	xfer.slaveAddress 	= MMA8652_ADDR;
+    xfer.direction 		= kI2C_Write;
+    xfer.subaddress 	= MMA8652_CTRL_REG1;
+    xfer.subaddressSize = 1;
+    xfer.data 			= buf;
+    xfer.dataSize 		= 1;
+    xfer.flags 			= kI2C_TransferRepeatedStartFlag;
+
+	i2c_res=kStatus_I2C_Busy;
+    I2C_MasterTransferNonBlocking(i2c, &i2c_handle, &xfer);
+
+    while (i2c_res==kStatus_I2C_Busy) {
+    }
+    if (i2c_res!=kStatus_Success) return kStatus_Fail;
+
+    return kStatus_Success;
+}
+
+status_t mma8652_read_xyz(int32_t* data) {
+    uint32_t scale = (mma8652_cfg >> 16) & 3; // full scale 2G, 4G, 8G
+    uint8_t buf[6];
+    i2c_master_transfer_t xfer = {
+        .slaveAddress = MMA8652_ADDR,
+        .direction = kI2C_Read,
+        .subaddress = MMA8652_OUT_X_MSB,
+        .subaddressSize = 1,
+        .data = buf,
+        .dataSize = 6,
+        .flags = kI2C_TransferDefaultFlag
+    };
+
+    if (mma8652_cfg & MMA8652_RES_8) xfer.dataSize = 3;
+
+    i2c_res = kStatus_I2C_Busy;
+    I2C_MasterTransferNonBlocking(i2c, &i2c_handle, &xfer);
+
+    while (i2c_res == kStatus_I2C_Busy) {
+    }
+
+    if (i2c_res != kStatus_Success) return kStatus_Fail;
+
+    /* Combine MSB and LSB for X, Y, Z */
+    int16_t x = (int16_t)((buf[0] << 8) | buf[1]) >> 4;
+    int16_t y = (int16_t)((buf[2] << 8) | buf[3]) >> 4;
+    int16_t z = (int16_t)((buf[4] << 8) | buf[5]) >> 4;
+
+    switch(scale) {
+        case 0: // ±2g
+            data[0] = ((1000 * x + 512) >> 10);
+            data[1] = ((1000 * y + 512) >> 10);
+            data[2] = ((1000 * z + 512) >> 10);
+            break;
+        case 1: // ±4g
+            data[0] = ((1000 * x + 256) >> 9);
+            data[1] = ((1000 * y + 256) >> 9);
+            data[2] = ((1000 * z + 256) >> 9);
+            break;
+        case 2: // ±8g
+            data[0] = ((1000 * x + 128) >> 8);
+            data[1] = ((1000 * y + 128) >> 8);
+            data[2] = ((1000 * z + 128) >> 8);
+            break;
+        default:
+            return kStatus_Fail;
+    }
+
+    return i2c_res;
+}
+
+/***************************************************************************
  * Device table
  ***************************************************************************/
 Device * device_table[]={
@@ -416,6 +678,7 @@ Device * device_table[]={
 	&dev_leds,
     &dev_swuser,
 	&dev_serial,
+	&dev_accelerometer,
 	NULL
 };
 
@@ -438,3 +701,4 @@ void dev_init()
 
     vfs_mutex=sem_new(1);
 }
+

@@ -135,3 +135,4 @@ void sem_v(Semaphore * sem)
 {
 	__ASM volatile ("svc 10\n");
 }
+

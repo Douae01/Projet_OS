@@ -411,3 +411,4 @@ int32_t sys_sem_v(Semaphore * sem)
 
 	return sem->count;
 }
+
